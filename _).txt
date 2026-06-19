@@ -7,10 +7,10 @@ local RunService = game:GetService("RunService")
 local lp = Players.LocalPlayer
 local Networking = require(ReplicatedStorage.SharedModules.Networking)
 
--- Load Rayfield
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- Library
+library = loadstring(game:HttpGet('https://pastebin.com/raw/Q69rcHsK'))()
 
-local Window = Rayfield:CreateWindow({
+local Window = Library.CreateLib("Xdark Hub", "DarkTheme")
     Name = "GAG2 Autofarm",
     LoadingTitle = "GAG2 Autofarm",
     LoadingSubtitle = "by veedsi",
@@ -20,7 +20,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 
-local AutoTab = Window:CreateTab("Autofarm", 4483362748)
+local Tab = Window:NewTab("Recommended Scripts")
 
 local autoHarvest = false
 local autoSell = false
