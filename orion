@@ -1,39 +1,246 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local RemoteEvent = ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("Packet"):WaitForChild("RemoteEvent")
-local Networking = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("Networking"))
-local SendBatch = Networking.Mailbox.SendBatch
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
-local CHECK_INTERVAL = 5
+local lp = Players.LocalPlayer
+local Networking = require(ReplicatedStorage.SharedModules.Networking)
 
--- ================= SHOP DEFINITIONS =================
-local SHOPS = {
-    Seeds = {
-        stockFolder = "StockValues/SeedShop/Items",
-        restockPath = "StockValues/SeedShop/UnixNextRestock",
-        packetPrefix = "j",
-        guiLabel = "Seeds"
-    },
-    Gears = {
-        stockFolder = "StockValues/GearShop/Items",
-        restockPath = "StockValues/GearShop/UnixNextRestock",
-        packetPrefix = "n",
-        guiLabel = "Gears"
-    }
-}
+-- Load OrionLib
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
 
--- ================= HELPERS =================
-local function getStock(shopKey, itemName)
-    local path = SHOPS[shopKey].stockFolder
-    local folder = ReplicatedStorage
-    for segment in path:gmatch("[^/]+") do
-        folder = folder:FindFirstChild(segment)
-        if not folder then return 0 end
+local Window = OrionLib:MakeWindow({
+    Name = "GAG2 Autofarm", 
+    HidePremium = false, 
+    SaveConfig = false, 
+    ConfigFolder = "OrionTest"
+})
+
+
+local AutoTab = Window:MakeTab({
+	Name = "Autofarm",
+	Icon = "rbxassetid://4483362748",
+	PremiumOnly = false
+}))
+
+local autoHarvest = false
+local autoSell = false
+local sellCooldown = 5
+local OwnerPlot = nil
+
+local function getMyPlot()
+    local gardens = Workspace:FindFirstChild("Gardens")
+    if not gardens then return nil end
+    for _, plot in ipairs(gardens:GetChildren()) do
+        if plot.Name:lower():find("plot") and plot:GetAttribute("Owner") == lp.Name then
+            return plot
+        end
     end
-    local stockValue = folder:FindFirstChild(itemName)
-    if stockValue then return stockValue.Value or 0 end
-    return 0
+    return nil
+end
+
+local function isGrown(plant)
+    local maxAge = plant:GetAttribute("MaxAge")
+    local age = plant:GetAttribute("Age")
+    return maxAge and age and age >= maxAge
+end
+
+local function getHarvestablePlants()
+    if not OwnerPlot then return {} end
+    local result = {}
+    local plantsFolder = OwnerPlot:FindFirstChild("Plants")
+    if not plantsFolder then return result end
+
+    for _, plant in ipairs(plantsFolder:GetChildren()) do
+        local fruits = plant:FindFirstChild("Fruits")
+        if fruits then
+            for _, fruit in ipairs(fruits:GetChildren()) do
+                if fruit:IsA("Model") and isGrown(fruit) then
+                    table.insert(result, fruit)
+                end
+            end
+        elseif plant:IsA("Model") and isGrown(plant) then
+            table.insert(result, plant)
+        end
+    end
+    return result
+end
+
+local function harvest(plant)
+    if not plant then return end
+    local plantId = plant:GetAttribute("PlantId")
+    local fruitId = plant:GetAttribute("FruitId") or ""
+    if plantId then
+        Networking.Garden.CollectFruit:Fire(plantId, fruitId)
+    end
+end
+
+local function sellAll()
+    local ok, Net = pcall(function()
+        return require(ReplicatedStorage.SharedModules.Networking)
+    end)
+    if ok and Net and Net.NPCS and Net.NPCS.SellAll then
+        Net.NPCS.SellAll:Fire()
+    else
+        local Packet = ReplicatedStorage:FindFirstChild("SharedModules")
+        if Packet then Packet = Packet:FindFirstChild("Packet") end
+        if Packet then Packet = Packet:FindFirstChild("RemoteEvent") end
+        if Packet then
+            Packet:FireServer(buffer.fromstring("\157\000\018"))
+        end
+    end
+end
+
+AutoTab:CreateToggle({
+    Name = "Auto Harvest",
+    CurrentValue = false,
+    Flag = "AutoHarvest",
+    Callback = function(Value)
+        autoHarvest = Value
+        if Value then
+            if not OwnerPlot then OwnerPlot = getMyPlot() end
+            task.spawn(function()
+                while autoHarvest do
+                    if OwnerPlot then
+                        for _, plant in ipairs(getHarvestablePlants()) do
+                            if autoHarvest then
+                                harvest(plant)
+                                task.wait(0.02)
+                            end
+                        end
+                    end
+                    task.wait(0.12)
+                end
+            end)
+        end
+    end,
+})
+
+AutoTab:AddToggle({
+    Name = "Auto Sell",
+    CurrentValue = false,
+    Flag = "AutoSell",
+    Callback = function(Value)
+        autoSell = Value
+        if Value then
+            task.spawn(function()
+                while autoSell do
+                    sellAll()
+                    task.wait(sellCooldown)
+                end
+            end)
+        end
+    end,
+})
+
+AutoTab:AddSlider({
+    Name = "Sell Cooldown",
+    Range = {1, 60},
+    Increment = 1,
+    Suffix = "s",
+    CurrentValue = 5,
+    Flag = "SellCooldown",
+    Callback = function(Value)
+        sellCooldown = Value
+    end,
+})
+
+
+local PlayerTab = Window:CreateTab("Player", 4483362748)
+
+PlayerTab:AddSlider({
+    Name = "Walk Speed",
+    Range = {16, 33},           
+    Increment = 1,
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(Value)
+        if lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") then
+            lp.Character.Humanoid.WalkSpeed = Value
+        end
+    end,
+})
+
+PlayerTab:AddSlider({
+    Name = "Jump Power",
+    Range = {50, 300},
+    Increment = 5,
+    CurrentValue = 50,
+    Flag = "JumpPower",
+    Callback = function(Value)
+        if lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") then
+            lp.Character.Humanoid.JumpPower = Value
+        end
+    end,
+})
+
+PlayerTab:AddToggle({
+    Name = "Anti Idle (No AFK Kick)",
+    CurrentValue = false,
+    Flag = "AntiIdle",
+    Callback = function(Value)
+        if Value then
+            local VirtualUser = game:GetService("VirtualUser")
+            lp.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+            Rayfield:Notify({
+                Title = "Anti Idle Enabled",
+                Content = "You won't get kicked for being AFK",
+                Duration = 4
+            })
+        end
+    end,
+})
+
+
+local freezeEnabled = false
+local savedPosition = nil
+local freezeConnection = nil
+
+PlayerTab:AddToggle({
+    Name = "Freeze Position (Anti Steal)",
+    CurrentValue = false,
+    Flag = "FreezePosition",
+    Callback = function(Value)
+        freezeEnabled = Value
+
+        if Value then
+            if lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") then
+                savedPosition = lp.Character.HumanoidRootPart.CFrame
+                Rayfield:Notify({
+                    Title = "Position Saved",
+                    Content = "You will be returned here if moved",
+                    Duration = 4
+                })
+            end
+
+            freezeConnection = RunService.Heartbeat:Connect(function()
+                if not freezeEnabled or not savedPosition then return end
+                if not lp.Character or not lp.Character:FindFirstChild("HumanoidRootPart") then return end
+
+                local root = lp.Character.HumanoidRootPart
+                local distance = (root.Position - savedPosition.Position).Magnitude
+
+                if distance > 15 then
+                    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Linear)
+                    local tween = TweenService:Create(root, tweenInfo, {CFrame = savedPosition})
+                    tween:Play()
+                end
+            end)
+
+        else
+            if freezeConnection then
+                freezeConnection:Disconnect()
+                freezeConnection = nil
+            end
+            savedPosition = nil
+        end
+    end,
+})
+
 end
 
 local function getUnixNextRestock(shopKey)
